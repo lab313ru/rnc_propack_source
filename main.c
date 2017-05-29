@@ -12,14 +12,13 @@ typedef struct huftable_s {
     uint32 l1; // +0
     uint16 l2; // +4
     uint32 l3; // +6
-    uint16 l4; // +A
+    uint16 bit_depth; // +A
 } huftable_t;
 
 #pragma pack(pop)
 
 typedef struct vars_s {
-    uint32 calculated_crc;
-    uint16 max_reps;
+    uint16 max_matches;
     uint16 enc_key;
     uint32 pack_block_size;
     uint16 dict_size;
@@ -29,15 +28,12 @@ typedef struct vars_s {
 
     // inner
     uint32 packed_size;
-    uint32 src_bytes_left;
-    uint32 src_bytes_left_no_header;
     uint32 processed_size;
     uint32 v7;
     uint32 pack_block_pos;
     uint16 pack_token, bit_count, v11;
     uint16 last_min_offset;
     uint32 v17;
-    uint16 v18;
     uint32 pack_block_left_size;
     uint16 match_count;
     uint16 match_offset;
@@ -46,7 +42,7 @@ typedef struct vars_s {
 
     uint32 unpacked_size;
     uint32 rnc_data_size;
-    uint16 unpacked_crc;
+    uint16 unpacked_crc, unpacked_crc_real;
     uint16 packed_crc;
     uint32 leeway;
     uint32 chunks_count;
@@ -212,8 +208,8 @@ vars_t *init_vars()
 {
     vars_t *v = (vars_t*)malloc(sizeof(vars_t));
     v->enc_key = 0;
-    v->max_reps = 0x1000;
-    v->calculated_crc = 0;
+    v->max_matches = 0x1000;
+    v->unpacked_crc_real = 0;
     v->pack_block_size = 0x3000;
     v->dict_size = 0xFFFF;
     v->method = 1;
@@ -269,7 +265,7 @@ int parse_args(int argc, char **argv, vars_t *vars)
             break;
         case 'm':
             sscanf(&argv[i][3], "%d", &vars->method);
-            if (vars->method == 0 || vars->method > 2)
+            if (!vars->method || vars->method > 2)
                 return 3;
             break;
         default:
@@ -330,7 +326,7 @@ void update_unpacked_crc(vars_t *v, uint8 b)
 
 void write_to_output(vars_t *v, uint8 b)
 {
-    if (v->packed_size >= v->src_bytes_left_no_header)
+    if (v->packed_size >= (v->input_size - RNC_HEADER_SIZE))
         return;
 
     write_byte(v->output, &v->output_offset, b);
@@ -345,7 +341,7 @@ uint8 read_from_input(vars_t *v)
     return b;
 }
 
-void write_bits_and_update_packed_crc_2(vars_t *v, uint16 value, int count)
+void read_encoded_byte_m2(vars_t *v, uint16 value, int count)
 {
     uint32 mask = (1 << (count - 1));
 
@@ -377,7 +373,7 @@ void write_bits_and_update_packed_crc_2(vars_t *v, uint16 value, int count)
     }
 }
 
-void write_bits_and_update_packed_crc_1(vars_t *v, uint16 value, int count)
+void read_encoded_byte_m1(vars_t *v, uint16 value, int count)
 {
     while (count--)
     {
@@ -406,12 +402,12 @@ void write_bits_and_update_packed_crc_1(vars_t *v, uint16 value, int count)
     }
 }
 
-void write_bits_and_update_packed_crc(vars_t *v, uint16 bits, int x)
+void read_encoded_byte(vars_t *v, uint16 bits, int count)
 {
     if (v->method == 2)
-        write_bits_and_update_packed_crc_2(v, bits, x);
+        read_encoded_byte_m2(v, bits, count);
     else
-        write_bits_and_update_packed_crc_1(v, bits, x);
+        read_encoded_byte_m1(v, bits, count);
 }
 
 int find_matches(vars_t *v)
@@ -472,8 +468,8 @@ int find_matches(vars_t *v)
                 max_count = match_offset;
             }
 
-            if (max_count > v->max_reps)
-                max_count = v->max_reps;
+            if (max_count > v->max_matches)
+                max_count = v->max_matches;
 
             if (max_count >= v->match_count)
             {
@@ -578,7 +574,7 @@ void encode_matches(vars_t *v, uint16 w)
             w--;
             count--;
 
-            if (w == 0)
+            if (!w)
                 return;
 
             if (count <= 1)
@@ -605,22 +601,24 @@ void encode_matches(vars_t *v, uint16 w)
 void proc_6(vars_t *v)
 {
     v->v17 = 0;
-    v->v18 = 0;
     v->pack_block_left_size = v->pack_block_size;
     v->input_offset = v->read_start_offset + v->v7 + v->pack_block_pos;
     v->temp_offset = 0;
 
-    while (v->src_bytes_left || v->pack_block_pos)
+    uint32 data_length = 0;
+    uint32 bytes_left = v->input_size;
+
+    while (bytes_left || v->pack_block_pos)
     {
         uint16 size_to_read = 0xFFFF - v->dict_size - v->pack_block_pos;
 
-        if (v->src_bytes_left < size_to_read)
-            size_to_read = v->src_bytes_left;
+        if (bytes_left < size_to_read)
+            size_to_read = bytes_left;
 
         v->pack_block_start = &v->mem1[v->dict_size];
         read_buf(&v->pack_block_start[v->pack_block_pos], v->input, &v->input_offset, size_to_read);
 
-        v->src_bytes_left -= size_to_read;
+        bytes_left -= size_to_read;
         v->pack_block_pos += size_to_read;
 
         v->pack_block_max = &v->pack_block_start[v->pack_block_pos];
@@ -637,13 +635,13 @@ void proc_6(vars_t *v)
             {
                 if (v->pack_block_start + v->match_count <= v->pack_block_max)
                 {
-                    update_bits_table(v, v->raw_table, v->v18);
+                    update_bits_table(v, v->raw_table, data_length);
                     update_bits_table(v, v->pos_table, v->match_count - 2);
                     update_bits_table(v, v->len_table, v->match_offset - 1);
 
                     encode_matches(v, v->match_count);
                     v->v17++;
-                    v->v18 = 0;
+                    data_length = 0;
                 }
                 else
                 {
@@ -656,7 +654,7 @@ void proc_6(vars_t *v)
             else
             {
                 encode_matches(v, 1);
-                v->v18++;
+                data_length++;
             }
         }
 
@@ -664,16 +662,16 @@ void proc_6(vars_t *v)
 
         memcpy(&v->pack_block_start[-v->dict_size], v->mem1, v->dict_size + v->pack_block_pos);
 
-        if ((v->pack_block_max < v->pack_block_end) || ((v->pack_block_max == v->pack_block_end) && (v->src_bytes_left == 0)) || v->v17 == 0xFFFE)
+        if ((v->pack_block_max < v->pack_block_end) || ((v->pack_block_max == v->pack_block_end) && !bytes_left) || v->v17 == 0xFFFE)
             break;
 
         v->pack_block_left_size -= &v->pack_block_start[-v->dict_size] - v->mem1;
     }
 
-    if (v->pack_block_max == v->pack_block_end && v->src_bytes_left == 0 && v->v17 != 0xFFFE)
-        v->v18 += v->pack_block_pos;
+    if (v->pack_block_max == v->pack_block_end && !bytes_left && v->v17 != 0xFFFE)
+        data_length += v->pack_block_pos;
 
-    update_bits_table(v, v->raw_table, v->v18);
+    update_bits_table(v, v->raw_table, data_length);
     v->v17++;
 
     v->temp_offset = 0;
@@ -690,28 +688,28 @@ void update_tmp_crc_data(vars_t *v, uint8 b)
         write_to_output(v, b);
 }
 
-void encode_matches_count(vars_t *v, uint16 w)
+void encode_matches_count(vars_t *v, uint16 count)
 {
-    while (w)
+    while (count)
     {
-        if (w >= 12)
+        if (count >= 12)
         {
-            if (w & 3)
+            if (count & 3)
             {
-                write_bits_and_update_packed_crc_2(v, 0, 1);
+                read_encoded_byte_m2(v, 0, 1);
 
                 uint8 b = read_from_input(v);
                 update_tmp_crc_data(v, (v->enc_key ^ b) & 0xFF);
 
-                w--;
+                count--;
             }
             else
             {
-                write_bits_and_update_packed_crc_2(v, 0x17, 5);
+                read_encoded_byte_m2(v, 0x17, 5);
 
-                if (w >= 72)
+                if (count >= 72)
                 {
-                    write_bits_and_update_packed_crc_2(v, 0xF, 4);
+                    read_encoded_byte_m2(v, 0xF, 4);
 
                     for (int i = 0; i < 72; ++i)
                     {
@@ -719,13 +717,13 @@ void encode_matches_count(vars_t *v, uint16 w)
                         update_tmp_crc_data(v, (v->enc_key ^ b) & 0xFF);
                     }
 
-                    w -= 72;
+                    count -= 72;
                 }
                 else
                 {
-                    write_bits_and_update_packed_crc_2(v, (w - 12) >> 2, 4);
+                    read_encoded_byte_m2(v, (count - 12) >> 2, 4);
 
-                    while (w--)
+                    while (count--)
                     {
                         uint8 b = read_from_input(v);
                         update_tmp_crc_data(v, (v->enc_key ^ b) & 0xFF);
@@ -735,16 +733,16 @@ void encode_matches_count(vars_t *v, uint16 w)
 
             ror_w(&v->enc_key);
         }
-        else while (w != 0)
+        else while (count != 0)
         {
-            write_bits_and_update_packed_crc_2(v, 0, 1);
+            read_encoded_byte_m2(v, 0, 1);
 
             uint8 b = read_from_input(v);
             update_tmp_crc_data(v, (v->enc_key ^ b) & 0xFF);
 
             ror_w(&v->enc_key);
 
-            w--;
+            count--;
         }
     }
 }
@@ -756,7 +754,7 @@ void clear_table(huftable_t *data, int count)
         data[i].l1 = 0;
         data[i].l2 = 0xFFFF;
         data[i].l3 = 0;
-        data[i].l4 = 0;
+        data[i].bit_depth = 0;
     }
 }
 
@@ -825,7 +823,7 @@ void proc_20(huftable_t *data, int count)
                 break;
             }
 
-            if (data[i].l4 == bits_count)
+            if (data[i].bit_depth == bits_count)
             {
                 data[i].l3 = inverse_bits(val / div, bits_count);
                 val += div;
@@ -850,12 +848,12 @@ void proc_16(vars_t *v, huftable_t *data, int count)
         }
     }
 
-    if (d4 == 0)
+    if (!d4)
         return;
 
     if (d4 == 1)
     {
-        data[ve].l4++;
+        data[ve].bit_depth++;
         return;
     }
 
@@ -863,21 +861,21 @@ void proc_16(vars_t *v, huftable_t *data, int count)
     {
         data[v->v20].l1 += data[v->v21].l1;
         data[v->v21].l1 = 0;
-        data[v->v20].l4++;
+        data[v->v20].bit_depth++;
 
         while (data[v->v20].l2 != 0xFFFF)
         {
             v->v20 = data[v->v20].l2;
-            data[v->v20].l4++;
+            data[v->v20].bit_depth++;
         }
 
         data[v->v20].l2 = v->v21;
-        data[v->v21].l4++;
+        data[v->v21].bit_depth++;
 
         while (data[v->v21].l2 != 0xFFFF)
         {
             v->v21 = data[v->v21].l2;
-            data[v->v21].l4++;
+            data[v->v21].bit_depth++;
         }
     }
 
@@ -888,13 +886,13 @@ void proc_18(vars_t *v, huftable_t *data, int count)
 {
     int cnt = count;
 
-    while (cnt-- && data[cnt].l4 == 0)
+    while (cnt-- && !data[cnt].bit_depth)
         count--;
 
-    write_bits_and_update_packed_crc_1(v, count, 5);
+    read_encoded_byte_m1(v, count, 5);
 
     for (int i = 0; i < count; ++i)
-        write_bits_and_update_packed_crc_1(v, data[i].l4, 4);
+        read_encoded_byte_m1(v, data[i].bit_depth, 4);
 }
 
 void proc_19(vars_t *v, huftable_t *data, int count)
@@ -906,10 +904,10 @@ void proc_19(vars_t *v, huftable_t *data, int count)
     else
         bits = count;
 
-    write_bits_and_update_packed_crc_1(v, data[bits].l3, data[bits].l4);
+    read_encoded_byte_m1(v, data[bits].l3, data[bits].bit_depth);
 
     if (bits > 1)
-        write_bits_and_update_packed_crc_1(v, count - (1 << (bits - 1)), bits - 1);
+        read_encoded_byte_m1(v, count - (1 << (bits - 1)), bits - 1);
 }
 
 void compress_data_2(vars_t *v)
@@ -923,10 +921,10 @@ void compress_data_2(vars_t *v)
 
         while (v->v17--)
         {
-            v->v18 = read_word_be(v->temp, &v->temp_offset);
-            v->v7 += v->v18;
+            uint32 data_length = read_word_be(v->temp, &v->temp_offset);
+            v->v7 += data_length;
 
-            encode_matches_count(v, v->v18);
+            encode_matches_count(v, data_length);
 
             if (v->v17)
             {
@@ -937,16 +935,16 @@ void compress_data_2(vars_t *v)
                 {
                     if (v->match_count > 7)
                     {
-                        write_bits_and_update_packed_crc_2(v, 0xF, 4);
+                        read_encoded_byte_m2(v, 0xF, 4);
                         update_tmp_crc_data(v, (v->match_count - 6) & 0xFF);
                     }
                     else
-                        write_bits_and_update_packed_crc_2(v, match_count_bits_table[v->match_count], match_count_bits_count_table[v->match_count]);
+                        read_encoded_byte_m2(v, match_count_bits_table[v->match_count], match_count_bits_count_table[v->match_count]);
 
-                    write_bits_and_update_packed_crc_2(v, match_offset_bits_table[v->match_offset >> 8], match_offset_bits_count_table[v->match_offset >> 8]);
+                    read_encoded_byte_m2(v, match_offset_bits_table[v->match_offset >> 8], match_offset_bits_count_table[v->match_offset >> 8]);
                 }
                 else
-                    write_bits_and_update_packed_crc_2(v, 6, 3);
+                    read_encoded_byte_m2(v, 6, 3);
 
                 update_tmp_crc_data(v, v->match_offset & 0xFF);
 
@@ -958,15 +956,15 @@ void compress_data_2(vars_t *v)
             }
         }
 
-        write_bits_and_update_packed_crc_2(v, 0xF, 4);
+        read_encoded_byte_m2(v, 0xF, 4);
         update_tmp_crc_data(v, 0);
 
         if (v->v7 >= v->unpacked_size)
-            write_bits_and_update_packed_crc_2(v, 0, 1);
+            read_encoded_byte_m2(v, 0, 1);
         else
-            write_bits_and_update_packed_crc_2(v, 1, 1);
+            read_encoded_byte_m2(v, 1, 1);
 
-        if (v->bit_count == 0)
+        if (!v->bit_count)
         {
             for (int i = 0; i < v->v11; ++i)
                 write_to_output(v, v->tmp_crc_data[i]);
@@ -1005,22 +1003,22 @@ void compress_data_1(vars_t *v)
         proc_18(v, v->len_table, _countof(v->len_table));
         proc_18(v, v->pos_table, _countof(v->pos_table));
 
-        write_bits_and_update_packed_crc_1(v, v->v17, 16);
+        read_encoded_byte_m1(v, v->v17, 16);
 
         while (v->v17--)
         {
-            v->v18 = read_word_be(v->temp, &v->temp_offset);
-            v->v7 += v->v18;
+            uint32 data_length = read_word_be(v->temp, &v->temp_offset);
+            v->v7 += data_length;
 
-            proc_19(v, v->raw_table, v->v18);
+            proc_19(v, v->raw_table, data_length);
 
-            if (v->v18)
+            if (data_length)
             {
-                while (v->v18--)
+                while (data_length--)
                 {
                     uint8 b = read_from_input(v);
 
-                    if (v->bit_count == 0)
+                    if (!v->bit_count)
                         write_to_output(v, (v->enc_key ^ b) & 0xFF);
                     else
                     {
@@ -1048,7 +1046,7 @@ void compress_data_1(vars_t *v)
             }
         }
 
-        if (v->bit_count == 0)
+        if (!v->bit_count)
         {
             for (int i = 0; i < v->v11; ++i)
                 write_to_output(v, v->tmp_crc_data[i]);
@@ -1069,15 +1067,12 @@ void compress_data_1(vars_t *v)
         write_to_output(v, v->pack_token >> 8);
 }
 
-void do_pack_data(vars_t *v, int in_size1, int in_size2)
+void do_pack_data(vars_t *v)
 {
-    v->unpacked_size = in_size1;
-    v->packed_size = in_size1;
-    v->src_bytes_left = in_size1;
+    v->unpacked_size = v->input_size;
+    v->packed_size = v->input_size;
 
-    v->src_bytes_left_no_header = (in_size2 - RNC_HEADER_SIZE);
-
-    if (in_size1 <= RNC_HEADER_SIZE)
+    if (v->input_size <= RNC_HEADER_SIZE)
         return;
 
     v->unpacked_crc = 0;
@@ -1109,8 +1104,8 @@ void do_pack_data(vars_t *v, int in_size1, int in_size2)
     write_word_be(v->output, &v->output_offset, 0);
 
     uint16 key = v->enc_key;
-    write_bits_and_update_packed_crc(v, 0, 1); // no lock
-    write_bits_and_update_packed_crc(v, (v->enc_key ? 1 : 0), 1);
+    read_encoded_byte(v, 0, 1); // no lock
+    read_encoded_byte(v, (v->enc_key ? 1 : 0), 1);
 
     switch (v->method)
     {
@@ -1165,7 +1160,7 @@ int do_pack(vars_t *v)
     if ((peek_dword_be(v->input, v->input_offset) >> 8) == RNC_SIGN)
         return 3;
 
-    do_pack_data(v, v->input_size, v->input_size);
+    do_pack_data(v, v->input_size);
 
     return 0;
 }
@@ -1196,13 +1191,13 @@ uint8 read_source_byte(vars_t *v)
     return *v->pack_block_start++;
 }
 
-int pack_block_start_bits_m2(vars_t *v, uint16 count)
+uint32 input_bits_m2(vars_t *v, uint16 count)
 {
-    int bits = 0;
+    uint32 bits = 0;
 
     while (count--)
     {
-        if (v->bit_count == 0)
+        if (!v->bit_count)
         {
             v->bit_buffer = read_source_byte(v);
             v->bit_count = 8;
@@ -1220,14 +1215,14 @@ int pack_block_start_bits_m2(vars_t *v, uint16 count)
     return bits;
 }
 
-int pack_block_start_bits_m1(vars_t *v, uint16 count)
+uint32 input_bits_m1(vars_t *v, uint16 count)
 {
-    int bits = 0;
-    int prev_bits = 1;
+    uint32 bits = 0;
+    uint32 prev_bits = 1;
 
     while (count--)
     {
-        if (v->bit_count == 0)
+        if (!v->bit_count)
         {
             uint8 b1 = read_source_byte(v);
             uint8 b2 = read_source_byte(v);
@@ -1247,46 +1242,41 @@ int pack_block_start_bits_m1(vars_t *v, uint16 count)
     return bits;
 }
 
-int pack_block_start_bits(vars_t *v, uint16 count)
+int input_bits(vars_t *v, uint16 count)
 {
     if (v->method != 2)
-        return pack_block_start_bits_m1(v, count);
+        return input_bits_m1(v, count);
     else
-        return pack_block_start_bits_m2(v, count);
+        return input_bits_m2(v, count);
 }
 
 void decode_match_count(vars_t *v)
 {
-    v->match_count = pack_block_start_bits_m2(v, 1) + 4;
+    v->match_count = input_bits_m2(v, 1) + 4;
 
-    if (pack_block_start_bits_m2(v, 1))
-        v->match_count = ((v->match_count - 1) << 1) + pack_block_start_bits_m2(v, 1);
+    if (input_bits_m2(v, 1))
+        v->match_count = ((v->match_count - 1) << 1) + input_bits_m2(v, 1);
 }
 
 void decode_match_offset(vars_t *v)
 {
     v->match_offset = 0;
-    if (pack_block_start_bits_m2(v, 1))
+    if (input_bits_m2(v, 1))
     {
-        v->match_offset = pack_block_start_bits_m2(v, 1);
+        v->match_offset = input_bits_m2(v, 1);
 
-        if (pack_block_start_bits_m2(v, 1))
+        if (input_bits_m2(v, 1))
         {
-            v->match_offset = ((v->match_offset << 1) | pack_block_start_bits_m2(v, 1)) | 4;
+            v->match_offset = ((v->match_offset << 1) | input_bits_m2(v, 1)) | 4;
 
-            if (pack_block_start_bits_m2(v, 1) == 0)
-                v->match_offset = (v->match_offset << 1) | pack_block_start_bits_m2(v, 1);
+            if (!input_bits_m2(v, 1))
+                v->match_offset = (v->match_offset << 1) | input_bits_m2(v, 1);
         }
-        else if (v->match_offset == 0)
-            v->match_offset = pack_block_start_bits_m2(v, 1) + 2;
+        else if (!v->match_offset)
+            v->match_offset = input_bits_m2(v, 1) + 2;
     }
 
     v->match_offset = ((v->match_offset << 8) | read_source_byte(v)) + 1;
-}
-
-void proc_9(vars_t *v)
-{
-    v->v18 = (pack_block_start_bits_m2(v, 4) << 2) + 12;
 }
 
 void write_decoded_byte(vars_t *v, uint8 b)
@@ -1299,7 +1289,7 @@ void write_decoded_byte(vars_t *v, uint8 b)
     }
 
     *v->window++ = b;
-    v->calculated_crc = crc_table[(v->calculated_crc ^ b) & 0xFF] ^ (v->calculated_crc >> 8);
+    v->unpacked_crc_real = crc_table[(v->unpacked_crc_real ^ b) & 0xFF] ^ (v->unpacked_crc_real >> 8);
 }
 
 int unpack_data_m2(vars_t *v)
@@ -1308,7 +1298,7 @@ int unpack_data_m2(vars_t *v)
     {
         while (1)
         {
-            if (pack_block_start_bits_m2(v, 1) == 0)
+            if (!input_bits_m2(v, 1))
             {
                 write_decoded_byte(v, (v->enc_key ^ read_source_byte(v)) & 0xFF);
 
@@ -1318,17 +1308,17 @@ int unpack_data_m2(vars_t *v)
             }
             else
             {
-                if (pack_block_start_bits_m2(v, 1))
+                if (input_bits_m2(v, 1))
                 {
-                    if (pack_block_start_bits_m2(v, 1))
+                    if (input_bits_m2(v, 1))
                     {
-                        if (pack_block_start_bits_m2(v, 1))
+                        if (input_bits_m2(v, 1))
                         {
                             v->match_count = read_source_byte(v) + 8;
 
                             if (v->match_count == 8)
                             {
-                                pack_block_start_bits_m2(v, 1);
+                                input_bits_m2(v, 1);
                                 break;
                             }
                         }
@@ -1362,10 +1352,10 @@ int unpack_data_m2(vars_t *v)
                     }
                     else
                     {
-                        proc_9(v);
-                        v->processed_size += v->v18;
+                        uint32 data_length = (input_bits_m2(v, 4) << 2) + 12;
+                        v->processed_size += data_length;
 
-                        while (v->v18--)
+                        while (data_length--)
                             write_decoded_byte(v, (v->enc_key ^ read_source_byte(v)) & 0xFF);
 
                         ror_w(&v->enc_key);
@@ -1383,34 +1373,34 @@ void make_huftable(vars_t *v, huftable_t *data, int count)
 {
     clear_table(data, count);
 
-    int bits = pack_block_start_bits_m1(v, 5);
+    int leaf_nodes = input_bits_m1(v, 5);
 
-    if (bits)
+    if (leaf_nodes)
     {
-        if (bits > 16)
-            bits = 16;
+        if (leaf_nodes > 16)
+            leaf_nodes = 16;
 
-        for (int i = 0; i < bits; ++i)
-            data[i].l4 = pack_block_start_bits_m1(v, 4);
+        for (int i = 0; i < leaf_nodes; ++i)
+            data[i].bit_depth = input_bits_m1(v, 4);
 
-        proc_20(data, bits);
+        proc_20(data, leaf_nodes);
     }
 }
 
-int proc_4(vars_t *v, huftable_t *data)
+uint32 decode_table_data(vars_t *v, huftable_t *data)
 {
-    int i = 0;
+    uint32 i = 0;
 
     while (1)
     {
-        if (data[i].l4 && (data[i].l3 == (v->bit_buffer & ((1 << data[i].l4) - 1))))
+        if (data[i].bit_depth && (data[i].l3 == (v->bit_buffer & ((1 << data[i].bit_depth) - 1))))
         {
-            pack_block_start_bits_m1(v, data[i].l4);
+            input_bits_m1(v, data[i].bit_depth);
 
             if (i < 2)
                 return i;
 
-            return pack_block_start_bits_m1(v, i - 1) | (1 << (i - 1));
+            return input_bits_m1(v, i - 1) | (1 << (i - 1));
         }
 
         i++;
@@ -1425,16 +1415,16 @@ int unpack_data_m1(vars_t *v)
         make_huftable(v, v->len_table, _countof(v->len_table));
         make_huftable(v, v->pos_table, _countof(v->pos_table));
 
-        int counts = pack_block_start_bits_m1(v, 16);
+        int subchunks = input_bits_m1(v, 16);
 
-        while (counts--)
+        while (subchunks--)
         {
-            v->v18 = proc_4(v, v->raw_table);
-            v->processed_size += v->v18;
+            uint32 data_length = decode_table_data(v, v->raw_table);
+            v->processed_size += data_length;
 
-            if (v->v18)
+            if (data_length)
             {
-                while (v->v18--)
+                while (data_length--)
                     write_decoded_byte(v, (v->enc_key ^ read_source_byte(v)) & 0xFF);
 
                 ror_w(&v->enc_key);
@@ -1442,10 +1432,10 @@ int unpack_data_m1(vars_t *v)
                 v->bit_buffer = (((v->pack_block_start[2] << 16) | (v->pack_block_start[1] << 8) | v->pack_block_start[0]) << v->bit_count) | (v->bit_buffer & ((1 << v->bit_count) - 1));
             }
 
-            if (counts)
+            if (subchunks)
             {
-                v->match_offset = proc_4(v, v->len_table) + 1;
-                v->match_count = proc_4(v, v->pos_table) + 2;
+                v->match_offset = decode_table_data(v, v->len_table) + 1;
+                v->match_count = decode_table_data(v, v->pos_table) + 2;
                 v->processed_size += v->match_count;
 
                 while (v->match_count--)
@@ -1483,7 +1473,7 @@ int do_unpack_data(vars_t *v)
     v->pack_block_start = &v->mem1[0xFFFD];
     v->window = &v->decoded[v->dict_size];
 
-    v->calculated_crc = 0;
+    v->unpacked_crc_real = 0;
     v->bit_count = 0;
     v->bit_buffer = 0;
     v->processed_size = 0;
@@ -1491,16 +1481,16 @@ int do_unpack_data(vars_t *v)
     uint16 specified_key = v->enc_key;
 
     int error_code = 0;
-    if (pack_block_start_bits(v, 1) && v->pu_mode == 0)
+    if (input_bits(v, 1) && !v->pu_mode)
         error_code = 9;
 
-    if (error_code == 0)
+    if (!error_code)
     {
-        if (pack_block_start_bits(v, 1) && v->enc_key == 0) // key is needed, but not specified as argument
+        if (input_bits(v, 1) && !v->enc_key) // key is needed, but not specified as argument
             error_code = 10;
     }
 
-    if (error_code == 0)
+    if (!error_code)
     {
         switch (v->method)
         {
@@ -1519,7 +1509,7 @@ int do_unpack_data(vars_t *v)
     if (error_code)
         return error_code;
 
-    if (v->unpacked_crc != v->calculated_crc)
+    if (v->unpacked_crc != v->unpacked_crc_real)
         return 5;
 
     return 0;
@@ -1545,13 +1535,13 @@ int main(int argc, char *argv[])
     {
         if (v->dict_size > 0x8000)
             v->dict_size = 0x8000;
-        v->max_reps = 0x1000;
+        v->max_matches = 0x1000;
     }
     else if (v->method == 2)
     {
         if (v->dict_size > 0x1000)
             v->dict_size = 0x1000;
-        v->max_reps = 0xFF;
+        v->max_matches = 0xFF;
     }
 
     FILE *in = fopen(argv[2], "rb");
@@ -1570,14 +1560,14 @@ int main(int argc, char *argv[])
     v->output = (uint8*)malloc(0x100000);
     v->temp = (uint8*)malloc(0x100000);
 
-    int result = 0;
+    int error_code = 0;
     switch (v->pu_mode)
     {
-    case 0: result = do_pack(v); break;
-    case 1: result = do_unpack(v); break;
+    case 0: error_code = do_pack(v); break;
+    case 1: error_code = do_unpack(v); break;
     }
 
-    if (result == 0)
+    if (!error_code)
     {
         FILE *out = fopen(argv[3], "wb");
         if (out == NULL)
@@ -1597,5 +1587,5 @@ int main(int argc, char *argv[])
     free(v->temp);
     free(v);
 
-    return result;
+    return error_code;
 }
