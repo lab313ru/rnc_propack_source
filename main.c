@@ -133,8 +133,8 @@ void write_byte(uint8 *buf, uint32 *offset, uint8 b)
 
 uint16 peek_word_be(uint8 *buf, uint32 offset)
 {
-    uint8 b1 = peek_byte(buf, offset);
-    uint8 b2 = peek_byte(buf, offset);
+    uint8 b1 = peek_byte(buf, offset + 0);
+    uint8 b2 = peek_byte(buf, offset + 1);
 
     return (b1 << 8) | b2;
 }
@@ -155,8 +155,8 @@ void write_word_be(uint8 *buf, uint32 *offset, uint16 val)
 
 uint32 peek_dword_be(uint8 *buf, uint32 offset)
 {
-    uint16 w1 = peek_word_be(buf, offset);
-    uint16 w2 = peek_word_be(buf, offset);
+    uint16 w1 = peek_word_be(buf, offset + 0);
+    uint16 w2 = peek_word_be(buf, offset + 2);
 
     return (w1 << 16) | w2;
 }
