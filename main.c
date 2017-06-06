@@ -1,7 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-//#include <ctype.h>
+
+#ifndef _countof
+#ifndef __cplusplus
+#define _countof(_Array) (sizeof(_Array) / sizeof(_Array[0]))
+#else
+  extern "C++" {
+    template <typename _CountofType,size_t _SizeOfArray> char (*__countof_helper(UNALIGNED _CountofType (&_Array)[_SizeOfArray]))[_SizeOfArray];
+#define _countof(_Array) sizeof(*__countof_helper(_Array))
+  }
+#endif
+#endif
 
 typedef unsigned char uint8;
 typedef unsigned short uint16;
@@ -1160,7 +1170,7 @@ int do_pack(vars_t *v)
     if ((peek_dword_be(v->input, v->input_offset) >> 8) == RNC_SIGN)
         return 3;
 
-    do_pack_data(v, v->input_size);
+    do_pack_data(v);
 
     return 0;
 }
