@@ -241,6 +241,13 @@ vars_t *init_vars()
 
 int parse_args(int argc, char **argv, vars_t *vars)
 {
+    if (argc < 2)
+    {
+        printf("Usage (decompression): <infile.bin> <outfile.bin> [-i=hex_offset_to_read_from] [-k=hex_key_if_protected]\n");
+        printf("Usage (compression): <infile.bin> <outfile.bin> <-m=1|2> [-k=hex_key_to_protect]\n\n");
+        return 1;
+    }
+
     if (strchr("pu", argv[1][0]) || strchr("PU", argv[1][0]))
     {
         switch (argv[1][0])
