@@ -6,10 +6,10 @@
 #ifndef __cplusplus
 #define _countof(_Array) (sizeof(_Array) / sizeof(_Array[0]))
 #else
-  extern "C++" {
-    template <typename _CountofType,size_t _SizeOfArray> char (*__countof_helper(UNALIGNED _CountofType (&_Array)[_SizeOfArray]))[_SizeOfArray];
+extern "C++" {
+    template <typename _CountofType, size_t _SizeOfArray> char(*__countof_helper(UNALIGNED _CountofType(&_Array)[_SizeOfArray]))[_SizeOfArray];
 #define _countof(_Array) sizeof(*__countof_helper(_Array))
-  }
+}
 #endif
 #endif
 
@@ -37,6 +37,7 @@ typedef struct vars_s {
     uint32 input_size;
 
     // inner
+    uint32 bytes_left;
     uint32 packed_size;
     uint32 processed_size;
     uint32 v7;
@@ -183,13 +184,13 @@ void write_dword_be(uint8 *buf, uint32 *offset, uint32 val)
 
 void read_buf(uint8 *dest, uint8 *source, uint32 *offset, int size)
 {
-    memcpy(dest, &source[*offset], size);
+    memmove(dest, &source[*offset], size);
     *offset += size;
 }
 
 void write_buf(uint8 *dest, uint32 *offset, uint8 *source, int size)
 {
-    memcpy(&dest[*offset], source, size);
+    memmove(&dest[*offset], source, size);
     *offset += size;
 }
 
@@ -239,60 +240,6 @@ vars_t *init_vars()
     return v;
 }
 
-int parse_args(int argc, char **argv, vars_t *vars)
-{
-    if (argc < 2)
-    {
-        printf("Usage (decompression): <infile.bin> <outfile.bin> [-i=hex_offset_to_read_from] [-k=hex_key_if_protected]\n");
-        printf("Usage (compression): <infile.bin> <outfile.bin> <-m=1|2> [-k=hex_key_to_protect]\n\n");
-        return 1;
-    }
-
-    if (strchr("pu", argv[1][0]) || strchr("PU", argv[1][0]))
-    {
-        switch (argv[1][0])
-        {
-        case 'p': vars->pu_mode = 0; break;
-        case 'u': vars->pu_mode = 1; break;
-        }
-    }
-    else
-        return 1;
-
-    for (int i = 4; i < argc &&
-        (argv[i][0] == '-' || argv[i][0] == '/'); ++i)
-    {
-        switch (argv[i][1])
-        {
-        case 'k':
-            sscanf(&argv[i][3], "%hx", &vars->enc_key);
-            if (!vars->enc_key)
-                return 3;
-            break;
-        case 'd':
-            sscanf(&argv[i][3], "%hu", &vars->dict_size);
-            if (vars->dict_size < 0x400)
-                vars->dict_size = 0x400;
-            break;
-        case 'i':
-            sscanf(&argv[i][3], "%x", &vars->read_start_offset);
-            break;
-        case 'o':
-            sscanf(&argv[i][3], "%x", &vars->write_start_offset);
-            break;
-        case 'm':
-            sscanf(&argv[i][3], "%d", &vars->method);
-            if (!vars->method || vars->method > 2)
-                return 3;
-            break;
-        default:
-            break;
-        }
-    }
-
-    return 0;
-}
-
 void init_dicts(vars_t *v)
 {
     uint16 dict_size = v->dict_size;
@@ -320,8 +267,8 @@ void init_dicts(vars_t *v)
 
     for (int i = 0; i < dict_size; ++i)
     {
-        v->mem5[i] = 0;
-        v->mem4[i] = i;
+        v->mem5[i & 0x7FFF] = 0;
+        v->mem4[i & 0x7FFF] = i;
     }
 
     v->last_min_offset = 0;
@@ -358,7 +305,7 @@ uint8 read_from_input(vars_t *v)
     return b;
 }
 
-void read_encoded_byte_m2(vars_t *v, uint16 value, int count)
+void write_bits_m2(vars_t *v, uint16 value, int count)
 {
     uint32 mask = (1 << (count - 1));
 
@@ -390,7 +337,7 @@ void read_encoded_byte_m2(vars_t *v, uint16 value, int count)
     }
 }
 
-void read_encoded_byte_m1(vars_t *v, uint16 value, int count)
+void write_bits_m1(vars_t *v, uint16 value, int count)
 {
     while (count--)
     {
@@ -419,12 +366,12 @@ void read_encoded_byte_m1(vars_t *v, uint16 value, int count)
     }
 }
 
-void read_encoded_byte(vars_t *v, uint16 bits, int count)
+void write_bits(vars_t *v, uint16 bits, int count)
 {
     if (v->method == 2)
-        read_encoded_byte_m2(v, bits, count);
+        write_bits_m2(v, bits, count);
     else
-        read_encoded_byte_m1(v, bits, count);
+        write_bits_m1(v, bits, count);
 }
 
 int find_matches(vars_t *v)
@@ -436,8 +383,8 @@ int find_matches(vars_t *v)
     while (match_offset < (v->pack_block_end - v->pack_block_start) && (v->pack_block_start[match_offset] == v->pack_block_start[0]))
         match_offset++;
 
-    uint16 first_word = (v->pack_block_start[0] << 8) | (v->pack_block_start[1] << 0);
-    uint16 offset = v->mem2[first_word];
+    uint16 first_word = peek_word_be(v->pack_block_start, 0);
+    uint16 offset = v->mem2[first_word & 0x7FFF];
 
     while (1)
     {
@@ -452,7 +399,7 @@ int find_matches(vars_t *v)
             break;
         }
 
-        uint16 restore = v->mem4[offset];
+        uint16 restore = v->mem4[offset & 0x7FFF];
         uint16 min_offset = v->last_min_offset;
 
         if (min_offset <= offset)
@@ -460,9 +407,9 @@ int find_matches(vars_t *v)
 
         min_offset -= offset;
 
-        if ((v->pack_block_start[-min_offset] == v->pack_block_start[0]) && (v->pack_block_start[-min_offset + 1] == v->pack_block_start[1]))
+        if (peek_word_be(v->pack_block_start, -min_offset) == peek_word_be(v->pack_block_start, 0))
         {
-            uint16 max_count = v->mem5[offset];
+            uint16 max_count = v->mem5[offset & 0x7FFF];
 
             if (max_count <= min_offset)
             {
@@ -556,60 +503,57 @@ void encode_matches(vars_t *v, uint16 w)
 {
     while (1)
     {
-        uint16 restore = v->mem4[v->last_min_offset];
-        v->mem4[v->last_min_offset] = v->dict_size;
+        uint16 restore = v->mem4[v->last_min_offset & 0x7FFF];
+        v->mem4[v->last_min_offset & 0x7FFF] = v->dict_size;
 
         if (restore != v->last_min_offset)
         {
-            uint16 buffer_word = (v->pack_block_start[-v->dict_size] << 8) | (v->pack_block_start[-v->dict_size + 1] << 0);
-            v->mem2[buffer_word] = restore;
+            uint16 buffer_word = peek_word_be(v->pack_block_start, -v->dict_size);
+            v->mem2[buffer_word & 0x7FFF] = restore;
 
             if (v->dict_size == restore)
-                v->mem3[buffer_word] = v->dict_size;
+                v->mem3[buffer_word & 0x7FFF] = v->dict_size;
         }
 
-        uint16 buffer_word = (v->pack_block_start[0] << 8) | (v->pack_block_start[1] << 0);
+        uint16 buffer_word = peek_word_be(v->pack_block_start, 0);
 
-        if (v->mem2[buffer_word] == v->dict_size)
-            v->mem2[buffer_word] = v->last_min_offset;
+        if (v->mem2[buffer_word & 0x7FFF] == v->dict_size)
+            v->mem2[buffer_word & 0x7FFF] = v->last_min_offset;
         else
-            v->mem4[v->mem3[buffer_word]] = v->last_min_offset;
+            v->mem4[v->mem3[buffer_word & 0x7FFF] & 0x7FFF] = v->last_min_offset;
 
-        v->mem3[buffer_word] = v->last_min_offset;
+        v->mem3[buffer_word & 0x7FFF] = v->last_min_offset;
 
         int count = 1;
         while ((count < (v->pack_block_end - v->pack_block_start)) && (v->pack_block_start[count] == v->pack_block_start[0]))
             count++;
 
-        v->mem5[v->last_min_offset] = count;
+        v->mem5[v->last_min_offset & 0x7FFF] = count;
 
         while (1)
         {
             v->last_min_offset = (v->last_min_offset + 1) % v->dict_size;
 
             v->pack_block_start++;
-            w--;
-            count--;
 
-            if (!w)
+            if (!(--w))
                 return;
 
-            if (count <= 1)
+            if ((--count) <= 1)
                 break;
 
-            v->mem5[v->last_min_offset] = count;
+            v->mem5[v->last_min_offset & 0x7FFF] = count;
 
-            if (v->last_min_offset != v->mem4[v->last_min_offset])
+            if (v->last_min_offset != v->mem4[v->last_min_offset & 0x7FFF])
             {
-                restore = v->mem4[v->last_min_offset];
-                v->mem4[v->last_min_offset] = v->last_min_offset;
+                restore = v->mem4[v->last_min_offset & 0x7FFF];
+                v->mem4[v->last_min_offset & 0x7FFF] = v->last_min_offset;
 
-                buffer_word = (v->pack_block_start[-v->dict_size] << 8) | (v->pack_block_start[-v->dict_size + 1] << 0);
-
-                v->mem2[buffer_word] = restore;
+                buffer_word = peek_word_be(v->pack_block_start, -v->dict_size);
+                v->mem2[buffer_word & 0x7FFF] = restore;
 
                 if (v->dict_size == restore)
-                    v->mem3[buffer_word] = v->dict_size;
+                    v->mem3[buffer_word & 0x7FFF] = v->dict_size;
             }
         }
     }
@@ -623,19 +567,18 @@ void proc_6(vars_t *v)
     v->temp_offset = 0;
 
     uint32 data_length = 0;
-    uint32 bytes_left = v->input_size;
 
-    while (bytes_left || v->pack_block_pos)
+    while (v->bytes_left || v->pack_block_pos)
     {
         uint16 size_to_read = 0xFFFF - v->dict_size - v->pack_block_pos;
 
-        if (bytes_left < size_to_read)
-            size_to_read = bytes_left;
+        if (v->bytes_left < size_to_read)
+            size_to_read = v->bytes_left;
 
         v->pack_block_start = &v->mem1[v->dict_size];
         read_buf(&v->pack_block_start[v->pack_block_pos], v->input, &v->input_offset, size_to_read);
 
-        bytes_left -= size_to_read;
+        v->bytes_left -= size_to_read;
         v->pack_block_pos += size_to_read;
 
         v->pack_block_max = &v->pack_block_start[v->pack_block_pos];
@@ -677,15 +620,15 @@ void proc_6(vars_t *v)
 
         v->pack_block_pos = v->pack_block_end - v->pack_block_start;
 
-        memcpy(&v->pack_block_start[-v->dict_size], v->mem1, v->dict_size + v->pack_block_pos);
+        memmove(v->mem1, &v->pack_block_start[-v->dict_size], v->dict_size + v->pack_block_pos);
 
-        if ((v->pack_block_max < v->pack_block_end) || ((v->pack_block_max == v->pack_block_end) && !bytes_left) || v->v17 == 0xFFFE)
+        if ((v->pack_block_max < v->pack_block_end) || ((v->pack_block_max == v->pack_block_end) && !v->bytes_left) || v->v17 == 0xFFFE)
             break;
 
         v->pack_block_left_size -= &v->pack_block_start[-v->dict_size] - v->mem1;
     }
 
-    if (v->pack_block_max == v->pack_block_end && !bytes_left && v->v17 != 0xFFFE)
+    if (v->pack_block_max == v->pack_block_end && !v->bytes_left && v->v17 != 0xFFFE)
         data_length += v->pack_block_pos;
 
     update_bits_table(v, v->raw_table, data_length);
@@ -713,7 +656,7 @@ void encode_matches_count(vars_t *v, uint16 count)
         {
             if (count & 3)
             {
-                read_encoded_byte_m2(v, 0, 1);
+                write_bits_m2(v, 0, 1);
 
                 uint8 b = read_from_input(v);
                 update_tmp_crc_data(v, (v->enc_key ^ b) & 0xFF);
@@ -722,11 +665,11 @@ void encode_matches_count(vars_t *v, uint16 count)
             }
             else
             {
-                read_encoded_byte_m2(v, 0x17, 5);
+                write_bits_m2(v, 0x17, 5);
 
                 if (count >= 72)
                 {
-                    read_encoded_byte_m2(v, 0xF, 4);
+                    write_bits_m2(v, 0xF, 4);
 
                     for (int i = 0; i < 72; ++i)
                     {
@@ -738,7 +681,7 @@ void encode_matches_count(vars_t *v, uint16 count)
                 }
                 else
                 {
-                    read_encoded_byte_m2(v, (count - 12) >> 2, 4);
+                    write_bits_m2(v, (count - 12) >> 2, 4);
 
                     while (count--)
                     {
@@ -752,7 +695,7 @@ void encode_matches_count(vars_t *v, uint16 count)
         }
         else while (count != 0)
         {
-            read_encoded_byte_m2(v, 0, 1);
+            write_bits_m2(v, 0, 1);
 
             uint8 b = read_from_input(v);
             update_tmp_crc_data(v, (v->enc_key ^ b) & 0xFF);
@@ -903,28 +846,28 @@ void proc_18(vars_t *v, huftable_t *data, int count)
 {
     int cnt = count;
 
-    while (cnt-- && !data[cnt].bit_depth)
+    while (cnt && !data[--cnt].bit_depth)
         count--;
 
-    read_encoded_byte_m1(v, count, 5);
+    write_bits_m1(v, count, 5);
 
     for (int i = 0; i < count; ++i)
-        read_encoded_byte_m1(v, data[i].bit_depth, 4);
+        write_bits_m1(v, data[i].bit_depth, 4);
 }
 
 void proc_19(vars_t *v, huftable_t *data, int count)
 {
     int bits;
 
-    if (count >= 1)
+    if (count > 1)
         bits = bits_count(count);
     else
         bits = count;
 
-    read_encoded_byte_m1(v, data[bits].l3, data[bits].bit_depth);
+    write_bits_m1(v, data[bits].l3, data[bits].bit_depth);
 
     if (bits > 1)
-        read_encoded_byte_m1(v, count - (1 << (bits - 1)), bits - 1);
+        write_bits_m1(v, count - (1 << (bits - 1)), bits - 1);
 }
 
 void compress_data_2(vars_t *v)
@@ -952,16 +895,16 @@ void compress_data_2(vars_t *v)
                 {
                     if (v->match_count > 7)
                     {
-                        read_encoded_byte_m2(v, 0xF, 4);
+                        write_bits_m2(v, 0xF, 4);
                         update_tmp_crc_data(v, (v->match_count - 6) & 0xFF);
                     }
                     else
-                        read_encoded_byte_m2(v, match_count_bits_table[v->match_count], match_count_bits_count_table[v->match_count]);
+                        write_bits_m2(v, match_count_bits_table[v->match_count], match_count_bits_count_table[v->match_count]);
 
-                    read_encoded_byte_m2(v, match_offset_bits_table[v->match_offset >> 8], match_offset_bits_count_table[v->match_offset >> 8]);
+                    write_bits_m2(v, match_offset_bits_table[v->match_offset >> 8], match_offset_bits_count_table[v->match_offset >> 8]);
                 }
                 else
-                    read_encoded_byte_m2(v, 6, 3);
+                    write_bits_m2(v, 6, 3);
 
                 update_tmp_crc_data(v, v->match_offset & 0xFF);
 
@@ -973,13 +916,13 @@ void compress_data_2(vars_t *v)
             }
         }
 
-        read_encoded_byte_m2(v, 0xF, 4);
+        write_bits_m2(v, 0xF, 4);
         update_tmp_crc_data(v, 0);
 
         if (v->v7 >= v->unpacked_size)
-            read_encoded_byte_m2(v, 0, 1);
+            write_bits_m2(v, 0, 1);
         else
-            read_encoded_byte_m2(v, 1, 1);
+            write_bits_m2(v, 1, 1);
 
         if (!v->bit_count)
         {
@@ -1020,7 +963,7 @@ void compress_data_1(vars_t *v)
         proc_18(v, v->len_table, _countof(v->len_table));
         proc_18(v, v->pos_table, _countof(v->pos_table));
 
-        read_encoded_byte_m1(v, v->v17, 16);
+        write_bits_m1(v, v->v17, 16);
 
         while (v->v17--)
         {
@@ -1088,6 +1031,7 @@ void do_pack_data(vars_t *v)
 {
     v->unpacked_size = v->input_size;
     v->packed_size = v->input_size;
+    v->bytes_left = v->input_size;
 
     if (v->input_size <= RNC_HEADER_SIZE)
         return;
@@ -1121,8 +1065,8 @@ void do_pack_data(vars_t *v)
     write_word_be(v->output, &v->output_offset, 0);
 
     uint16 key = v->enc_key;
-    read_encoded_byte(v, 0, 1); // no lock
-    read_encoded_byte(v, (v->enc_key ? 1 : 0), 1);
+    write_bits(v, 0, 1); // no lock
+    write_bits(v, (v->enc_key ? 1 : 0), 1);
 
     switch (v->method)
     {
@@ -1301,7 +1245,7 @@ void write_decoded_byte(vars_t *v, uint8 b)
     if (&v->decoded[0xFFFF] == v->window)
     {
         write_buf(v->output, &v->output_offset, &v->decoded[v->dict_size], 0xFFFF - v->dict_size);
-        memcpy(&v->window[-v->dict_size], v->decoded, v->dict_size);
+        memmove(v->decoded, &v->window[-v->dict_size], v->dict_size);
         v->window = &v->decoded[v->dict_size];
     }
 
@@ -1542,11 +1486,67 @@ int do_unpack(vars_t *v)
     return do_unpack_data(v); // data
 }
 
+int parse_args(int argc, char **argv, vars_t *vars)
+{
+    if (argc < 2)
+    {
+        printf("Usage (decompression): u <infile.bin> <outfile.bin> [-i=hex_offset_to_read_from] [-k=hex_key_if_protected]\n");
+        printf("Usage (compression): p <infile.bin> <outfile.bin> <-m=1|2> [-k=hex_key_to_protect]\n\n");
+        return 1;
+    }
+
+    if (strchr("pu", argv[1][0]) || strchr("PU", argv[1][0]))
+    {
+        switch (argv[1][0])
+        {
+        case 'p': vars->pu_mode = 0; break;
+        case 'u': vars->pu_mode = 1; break;
+        }
+    }
+    else
+        return 1;
+
+    for (int i = 4; i < argc &&
+        (argv[i][0] == '-' || argv[i][0] == '/'); ++i)
+    {
+        switch (argv[i][1])
+        {
+        case 'k':
+            sscanf(&argv[i][3], "%hx", &vars->enc_key);
+            if (!vars->enc_key)
+                return 3;
+            break;
+        case 'd':
+            sscanf(&argv[i][3], "%hu", &vars->dict_size);
+            if (vars->dict_size < 0x400)
+                vars->dict_size = 0x400;
+            break;
+        case 'i':
+            sscanf(&argv[i][3], "%x", &vars->read_start_offset);
+            break;
+        case 'o':
+            sscanf(&argv[i][3], "%x", &vars->write_start_offset);
+            break;
+        case 'm':
+            sscanf(&argv[i][3], "%d", &vars->method);
+            if (!vars->method || vars->method > 2)
+                return 3;
+            break;
+        default:
+            break;
+        }
+    }
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     vars_t *v = init_vars();
-    if (parse_args(argc, argv, v))
+    if (parse_args(argc, argv, v)) {
+        printf("Wrong command line specified!\n");
         return 1;
+    }
 
     if (v->method == 1)
     {
@@ -1565,6 +1565,7 @@ int main(int argc, char *argv[])
     if (in == NULL)
     {
         free(v);
+        printf("Cannot open input file!\n");
         return -1;
     }
     fseek(in, 0, SEEK_END);
@@ -1593,10 +1594,17 @@ int main(int argc, char *argv[])
             free(v->output);
             free(v->temp);
             free(v);
+            printf("Cannot create output file!\n");
             return -1;
         }
         fwrite(v->output, v->output_offset, 1, out);
         fclose(out);
+    }
+    else {
+        switch (error_code) {
+        case 5: printf("CRC check failed.\n"); break;
+        default: printf("Cannot process file. Error code: %x\n", error_code); break;
+        }
     }
 
     free(v->input);
