@@ -1542,6 +1542,18 @@ int parse_args(int argc, char **argv, vars_t *vars)
 
 int main(int argc, char *argv[])
 {
+    printf("-= RNC ProPackED v1.0 [by Lab 313] (06/24/2017) =-\n");
+    printf("-----------------------------\n");
+    printf("Compression type: Huffman + LZ77\n");
+    printf("De/Compressor: Dr.MefistO\n");
+    printf("Coding: Dr. MefistO\n");
+    printf("Original: Rob Northen Computing\n");
+    printf("Our site: http://lab313.ru\n");
+    printf("Info: De(re)compiled source of the famous RNC ProPack compression tool\n\n");
+    printf("Unpack: <u> <infile.bin> <outfile.bin> [-i=hex_offset_to_read_from] [-k=hex_key_if_protected]\n");
+    printf("Pack:   <p> <infile.bin> <outfile.bin> <-m=1|2> [-k=hex_key_to_protect]\n");
+    printf("-----------------------------\n\n");
+
     vars_t *v = init_vars();
     if (parse_args(argc, argv, v)) {
         printf("Wrong command line specified!\n");
