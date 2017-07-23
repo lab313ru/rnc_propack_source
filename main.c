@@ -1673,8 +1673,8 @@ int main(int argc, char *argv[])
         fwrite(v->output, v->output_offset, 1, out);
         fclose(out);
 
-        printf("File successfully unpacked!\n");
-        printf("Compressed/decompressed size: %d/%d bytes\n", v->packed_size + RNC_HEADER_SIZE, v->output_offset);
+        printf("File successfully %s!\n", ((v->pus_mode == 0) ? "packed" : "unpacked"));
+        printf("Original/new size: %d/%d bytes\n", v->packed_size + RNC_HEADER_SIZE, v->output_offset);
     }
     else {
         switch (error_code) {
