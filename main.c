@@ -746,7 +746,7 @@ int proc_17(vars_t *v, huftable_t *data, int count)
         i++;
     }
 
-    return (d5 != -1 && d6 != -1);
+    return (d5 != 0xFFFFFFFF && d6 != 0xFFFFFFFF);
 }
 
 uint32 inverse_bits(uint32 value, int count)
@@ -1420,10 +1420,11 @@ int do_unpack_data(vars_t *v)
 
     v->method = sign & 3;
     uint32 input_size = read_dword_be(v->input, &v->input_offset);
-    if (input_size > v->input_size)
+    uint32 packed_size = read_dword_be(v->input, &v->input_offset);
+    if (packed_size > v->input_size)
         return 7;
     v->input_size = input_size;
-    v->packed_size = read_dword_be(v->input, &v->input_offset);
+    v->packed_size = packed_size;
     v->unpacked_crc = read_word_be(v->input, &v->input_offset);
     v->packed_crc = read_word_be(v->input, &v->input_offset);
 
@@ -1493,7 +1494,7 @@ int do_unpack(vars_t *v)
 int do_search(vars_t *v)
 {
     int error_code = 10;
-    for (int i = 0; i < v->input_size - RNC_HEADER_SIZE; )
+    for (uint32 i = 0; i < v->input_size - RNC_HEADER_SIZE; )
     {
         v->read_start_offset = i;
         v->input_offset = 0;
@@ -1650,7 +1651,7 @@ int main(int argc, char *argv[])
     if (!error_code)
     {
         FILE *out;
-        if (((argv[3][0] == '-') || (argv[3][0] == '/')))
+        if (argc <= 3 || ((argv[3][0] == '-') || (argv[3][0] == '/')))
         {
             char out_name[256];
             snprintf(out_name, sizeof(out_name), "%s.%.6x.bin", argv[2], v->read_start_offset);
