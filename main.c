@@ -33,7 +33,7 @@ typedef struct vars_s {
     uint32 pack_block_size;
     uint16 dict_size;
     uint32 method;
-    uint32 pu_mode;
+    uint32 pus_mode;
     uint32 input_size;
 
     // inner
@@ -82,6 +82,7 @@ typedef struct vars_s {
 
 #define RNC_SIGN 0x524E43 // RNC
 #define RNC_HEADER_SIZE 0x12
+#define MAX_BUF_SIZE 0x100000
 
 static const uint16 crc_table[] = {
     0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
@@ -207,7 +208,7 @@ uint16 crc_block(uint8 *buf, uint32 offset, int size)
     return crc;
 }
 
-inline void ror_w(uint16 *x)
+void ror_w(uint16 *x)
 {
     if (*x & 1)
         *x = 0x8000 | (*x >> 1);
@@ -224,7 +225,7 @@ vars_t *init_vars()
     v->pack_block_size = 0x3000;
     v->dict_size = 0xFFFF;
     v->method = 1;
-    v->pu_mode = 0;
+    v->pus_mode = 0;
 
     v->read_start_offset = 0;
     v->write_start_offset = 0;
@@ -1418,7 +1419,10 @@ int do_unpack_data(vars_t *v)
         return 6;
 
     v->method = sign & 3;
-    v->input_size = read_dword_be(v->input, &v->input_offset);
+    uint32 input_size = read_dword_be(v->input, &v->input_offset);
+    if (input_size > v->input_size)
+        return 7;
+    v->input_size = input_size;
     v->packed_size = read_dword_be(v->input, &v->input_offset);
     v->unpacked_crc = read_word_be(v->input, &v->input_offset);
     v->packed_crc = read_word_be(v->input, &v->input_offset);
@@ -1442,7 +1446,7 @@ int do_unpack_data(vars_t *v)
     uint16 specified_key = v->enc_key;
 
     int error_code = 0;
-    if (input_bits(v, 1) && !v->pu_mode)
+    if (input_bits(v, 1) && !v->pus_mode)
         error_code = 9;
 
     if (!error_code)
@@ -1486,55 +1490,91 @@ int do_unpack(vars_t *v)
     return do_unpack_data(v); // data
 }
 
+int do_search(vars_t *v)
+{
+    int error_code = 10;
+    for (int i = 0; i < v->input_size - RNC_HEADER_SIZE; )
+    {
+        v->read_start_offset = i;
+        v->input_offset = 0;
+        v->output_offset = 0;
+
+        uint8 *input_ptr = v->input;
+        v->input = &v->input[i];
+
+        int input_size = v->input_size;
+
+        if (!do_unpack(v))
+        {
+            printf("RNC archive found: 0x%.6x (%d bytes)\n", i, v->packed_size + RNC_HEADER_SIZE);
+            i += v->packed_size + RNC_HEADER_SIZE;
+            error_code = 0;
+        }
+        else
+            i++;
+
+        v->input_size = input_size;
+        v->input = input_ptr;
+    }
+
+    return error_code;
+}
+
+void print_usage()
+{
+    printf("Unpack: <u> <infile.bin> [outfile.bin] [-i=hex_offset_to_read_from] [-k=hex_key_if_protected]\n");
+    printf("Search: <s> <infile.bin>\n");
+    printf("Pack:   <p> <infile.bin> [outfile.bin] <-m=1|2> [-k=hex_key_to_protect]\n");
+}
+
 int parse_args(int argc, char **argv, vars_t *vars)
 {
     if (argc < 2)
-    {
-        printf("Usage (decompression): u <infile.bin> <outfile.bin> [-i=hex_offset_to_read_from] [-k=hex_key_if_protected]\n");
-        printf("Usage (compression): p <infile.bin> <outfile.bin> <-m=1|2> [-k=hex_key_to_protect]\n\n");
         return 1;
-    }
 
-    if (strchr("pu", argv[1][0]) || strchr("PU", argv[1][0]))
+    if (strchr("pus", argv[1][0]) || strchr("PUS", argv[1][0]))
     {
         switch (argv[1][0])
         {
-        case 'p': vars->pu_mode = 0; break;
-        case 'u': vars->pu_mode = 1; break;
+        case 'p': vars->pus_mode = 0; break;
+        case 'u': vars->pus_mode = 1; break;
+        case 's': vars->pus_mode = 2; break;
         }
     }
     else
         return 1;
 
-    for (int i = 4; i < argc &&
-        (argv[i][0] == '-' || argv[i][0] == '/'); ++i)
+    int i = 3;
+    while (i < argc)
     {
-        switch (argv[i][1])
-        {
-        case 'k':
-            sscanf(&argv[i][3], "%hx", &vars->enc_key);
-            if (!vars->enc_key)
-                return 3;
-            break;
-        case 'd':
-            sscanf(&argv[i][3], "%hu", &vars->dict_size);
-            if (vars->dict_size < 0x400)
-                vars->dict_size = 0x400;
-            break;
-        case 'i':
-            sscanf(&argv[i][3], "%x", &vars->read_start_offset);
-            break;
-        case 'o':
-            sscanf(&argv[i][3], "%x", &vars->write_start_offset);
-            break;
-        case 'm':
-            sscanf(&argv[i][3], "%d", &vars->method);
-            if (!vars->method || vars->method > 2)
-                return 3;
-            break;
-        default:
-            break;
-        }
+        if (((argv[i][0] == '-') || (argv[i][0] == '/')))
+            switch (argv[i][1])
+            {
+            case 'k':
+                sscanf(&argv[i][3], "%hx", &vars->enc_key);
+                if (!vars->enc_key)
+                    return 3;
+                break;
+            case 'd':
+                sscanf(&argv[i][3], "%hu", &vars->dict_size);
+                if (vars->dict_size < 0x400)
+                    vars->dict_size = 0x400;
+                break;
+            case 'i':
+                sscanf(&argv[i][3], "%x", &vars->read_start_offset);
+                break;
+            case 'o':
+                sscanf(&argv[i][3], "%x", &vars->write_start_offset);
+                break;
+            case 'm':
+                sscanf(&argv[i][3], "%d", &vars->method);
+                if (!vars->method || vars->method > 2)
+                    return 3;
+                break;
+            default:
+                break;
+            }
+        i++;
     }
 
     return 0;
@@ -1542,7 +1582,7 @@ int parse_args(int argc, char **argv, vars_t *vars)
 
 int main(int argc, char *argv[])
 {
-    printf("-= RNC ProPackED v1.0 [by Lab 313] (06/24/2017) =-\n");
+    printf("-= RNC ProPackED v1.1 [by Lab 313] (06/24/2017) =-\n");
     printf("-----------------------------\n");
     printf("Compression type: Huffman + LZ77\n");
     printf("De/Compressor: Dr.MefistO\n");
@@ -1550,8 +1590,7 @@ int main(int argc, char *argv[])
     printf("Original: Rob Northen Computing\n");
     printf("Our site: http://lab313.ru\n");
     printf("Info: De(re)compiled source of the famous RNC ProPack compression tool\n\n");
-    printf("Unpack: <u> <infile.bin> <outfile.bin> [-i=hex_offset_to_read_from] [-k=hex_key_if_protected]\n");
-    printf("Pack:   <p> <infile.bin> <outfile.bin> <-m=1|2> [-k=hex_key_to_protect]\n");
+    print_usage();
     printf("-----------------------------\n\n");
 
     vars_t *v = init_vars();
@@ -1587,19 +1626,40 @@ int main(int argc, char *argv[])
     fread(v->input, v->input_size, 1, in);
     fclose(in);
 
-    v->output = (uint8*)malloc(0x100000);
-    v->temp = (uint8*)malloc(0x100000);
+    v->output = (uint8*)malloc(MAX_BUF_SIZE);
+    v->temp = (uint8*)malloc(MAX_BUF_SIZE);
 
     int error_code = 0;
-    switch (v->pu_mode)
+    switch (v->pus_mode)
     {
     case 0: error_code = do_pack(v); break;
     case 1: error_code = do_unpack(v); break;
+    case 2: error_code = do_search(v); break;
+    }
+
+    if (v->pus_mode == 2)
+    {
+        free(v->input);
+        free(v->output);
+        free(v->temp);
+        free(v);
+
+        return error_code;
     }
 
     if (!error_code)
     {
-        FILE *out = fopen(argv[3], "wb");
+        FILE *out;
+        if (((argv[3][0] == '-') || (argv[3][0] == '/')))
+        {
+            char out_name[256];
+            snprintf(out_name, sizeof(out_name), "%s.%.6x.bin", argv[2], v->read_start_offset);
+
+            out = fopen(out_name, "wb");
+        }
+        else
+            out = fopen(argv[3], "wb");
+
         if (out == NULL)
         {
             free(v->input);
@@ -1609,12 +1669,21 @@ int main(int argc, char *argv[])
             printf("Cannot create output file!\n");
             return -1;
         }
+
         fwrite(v->output, v->output_offset, 1, out);
         fclose(out);
+
+        printf("File successfully unpacked!\n");
+        printf("Compressed/decompressed size: %d/%d bytes\n", v->packed_size + RNC_HEADER_SIZE, v->output_offset);
     }
     else {
         switch (error_code) {
+        case 4: printf("Corrupted input data.\n"); break;
         case 5: printf("CRC check failed.\n"); break;
+        case 6:
+        case 7:
+            printf("Wrong RNC header.\n"); break;
+        case 10: printf("No RNC archives were found.\n"); break;
         default: printf("Cannot process file. Error code: %x\n", error_code); break;
         }
     }
