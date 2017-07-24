@@ -35,6 +35,7 @@ typedef struct vars_s {
     uint32 method;
     uint32 pus_mode;
     uint32 input_size;
+    uint32 file_size;
 
     // inner
     uint32 bytes_left;
@@ -291,7 +292,7 @@ void update_unpacked_crc(vars_t *v, uint8 b)
 
 void write_to_output(vars_t *v, uint8 b)
 {
-    if (v->packed_size >= (v->input_size - RNC_HEADER_SIZE))
+    if (v->packed_size >= (v->file_size - RNC_HEADER_SIZE))
         return;
 
     write_byte(v->output, &v->output_offset, b);
@@ -1030,11 +1031,11 @@ void compress_data_1(vars_t *v)
 
 void do_pack_data(vars_t *v)
 {
-    v->unpacked_size = v->input_size;
-    v->packed_size = v->input_size;
-    v->bytes_left = v->input_size;
+    v->unpacked_size = v->file_size;
+    v->packed_size = v->file_size;
+    v->bytes_left = v->file_size;
 
-    if (v->input_size <= RNC_HEADER_SIZE)
+    if (v->file_size <= RNC_HEADER_SIZE)
         return;
 
     v->unpacked_crc = 0;
@@ -1113,7 +1114,7 @@ void do_pack_data(vars_t *v)
 
 int do_pack(vars_t *v)
 {
-    if (v->input_size <= RNC_HEADER_SIZE)
+    if (v->file_size <= RNC_HEADER_SIZE)
         return 2;
 
     v->input_offset = 0;
@@ -1131,7 +1132,7 @@ uint8 read_source_byte(vars_t *v)
 {
     if (v->pack_block_start == &v->mem1[0xFFFD])
     {
-        int left_size = v->input_size - v->input_offset;
+        int left_size = v->file_size - v->input_offset;
 
         int size_to_read;
         if (left_size <= 0xFFFD)
@@ -1419,12 +1420,10 @@ int do_unpack_data(vars_t *v)
         return 6;
 
     v->method = sign & 3;
-    uint32 input_size = read_dword_be(v->input, &v->input_offset);
-    uint32 packed_size = read_dword_be(v->input, &v->input_offset);
-    if (packed_size > v->input_size)
+    v->input_size = read_dword_be(v->input, &v->input_offset);
+    if (v->file_size < v->input_size)
         return 7;
-    v->input_size = input_size;
-    v->packed_size = packed_size;
+    v->packed_size = read_dword_be(v->input, &v->input_offset);
     v->unpacked_crc = read_word_be(v->input, &v->input_offset);
     v->packed_crc = read_word_be(v->input, &v->input_offset);
 
@@ -1483,9 +1482,9 @@ int do_unpack_data(vars_t *v)
 
 int do_unpack(vars_t *v)
 {
-    v->packed_size = v->input_size;
+    v->packed_size = v->file_size;
 
-    if (v->input_size < RNC_HEADER_SIZE)
+    if (v->file_size < RNC_HEADER_SIZE)
         return 6;
 
     return do_unpack_data(v); // data
@@ -1494,7 +1493,7 @@ int do_unpack(vars_t *v)
 int do_search(vars_t *v)
 {
     int error_code = 10;
-    for (uint32 i = 0; i < v->input_size - RNC_HEADER_SIZE; )
+    for (uint32 i = 0; i < v->file_size - RNC_HEADER_SIZE; )
     {
         v->read_start_offset = i;
         v->input_offset = 0;
@@ -1503,18 +1502,15 @@ int do_search(vars_t *v)
         uint8 *input_ptr = v->input;
         v->input = &v->input[i];
 
-        int input_size = v->input_size;
-
         if (!do_unpack(v))
         {
-            printf("RNC archive found: 0x%.6x (%d bytes)\n", i, v->packed_size + RNC_HEADER_SIZE);
+            printf("RNC archive found: 0x%.6x (%.6d/%.6d bytes)\n", i, v->packed_size + RNC_HEADER_SIZE, v->output_offset);
             i += v->packed_size + RNC_HEADER_SIZE;
             error_code = 0;
         }
         else
             i++;
 
-        v->input_size = input_size;
         v->input = input_ptr;
     }
 
@@ -1621,10 +1617,10 @@ int main(int argc, char *argv[])
         return -1;
     }
     fseek(in, 0, SEEK_END);
-    v->input_size = ftell(in) - v->read_start_offset;
+    v->file_size = ftell(in) - v->read_start_offset;
     fseek(in, v->read_start_offset, SEEK_SET);
-    v->input = (uint8*)malloc(v->input_size);
-    fread(v->input, v->input_size, 1, in);
+    v->input = (uint8*)malloc(v->file_size);
+    fread(v->input, v->file_size, 1, in);
     fclose(in);
 
     v->output = (uint8*)malloc(MAX_BUF_SIZE);
