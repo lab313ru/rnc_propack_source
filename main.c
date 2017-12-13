@@ -1421,9 +1421,9 @@ int do_unpack_data(vars_t *v)
 
     v->method = sign & 3;
     v->input_size = read_dword_be(v->input, &v->input_offset);
-    if (v->file_size < v->input_size)
-        return 7;
     v->packed_size = read_dword_be(v->input, &v->input_offset);
+    if (v->file_size < v->packed_size)
+        return 7;
     v->unpacked_crc = read_word_be(v->input, &v->input_offset);
     v->packed_crc = read_word_be(v->input, &v->input_offset);
 
