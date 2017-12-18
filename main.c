@@ -1671,7 +1671,7 @@ int main(int argc, char *argv[])
         fclose(out);
 
         printf("File successfully %s!\n", ((v->pus_mode == 0) ? "packed" : "unpacked"));
-        printf("Original/new size: %d/%d bytes\n", v->packed_size + RNC_HEADER_SIZE, v->output_offset);
+        printf("Original/new size: %d/%d bytes\n", (v->pus_mode == 1) ? (v->packed_size + RNC_HEADER_SIZE) : v->file_size, v->output_offset);
     }
     else {
         switch (error_code) {
