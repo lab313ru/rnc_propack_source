@@ -71,9 +71,9 @@ typedef struct vars_s {
     uint8 *decoded;
     uint8 *window;
 
-    uint32 read_start_offset, write_start_offset;
+    size_t read_start_offset, write_start_offset;
     uint8 *input, *output, *temp;
-    uint32 input_offset, output_offset, temp_offset;
+    size_t input_offset, output_offset, temp_offset;
 
     uint8 tmp_crc_data[2048];
     huftable_t raw_table[16];
@@ -125,22 +125,22 @@ static const uint8 match_count_bits_count_table[] = { 0,  4,  4,  4,  5,  5,  5 
 static const uint8 match_offset_bits_table[] = { 0x00, 0x06, 0x08, 0x09, 0x15, 0x17, 0x1D, 0x1F, 0x28, 0x29, 0x2C, 0x2D, 0x38, 0x39, 0x3C, 0x3D };
 static const uint8 match_offset_bits_count_table[] = { 1, 3, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6 };
 
-uint8 peek_byte(uint8 *buf, uint32 offset)
+uint8 peek_byte(uint8 *buf, size_t offset)
 {
     return buf[offset];
 }
 
-uint8 read_byte(uint8 *buf, uint32 *offset)
+uint8 read_byte(uint8 *buf, size_t *offset)
 {
     return buf[(*offset)++];
 }
 
-void write_byte(uint8 *buf, uint32 *offset, uint8 b)
+void write_byte(uint8 *buf, size_t *offset, uint8 b)
 {
     buf[(*offset)++] = b;
 }
 
-uint16 peek_word_be(uint8 *buf, uint32 offset)
+uint16 peek_word_be(uint8 *buf, size_t offset)
 {
     uint8 b1 = peek_byte(buf, offset + 0);
     uint8 b2 = peek_byte(buf, offset + 1);
@@ -148,7 +148,7 @@ uint16 peek_word_be(uint8 *buf, uint32 offset)
     return (b1 << 8) | b2;
 }
 
-uint16 read_word_be(uint8 *buf, uint32 *offset)
+uint16 read_word_be(uint8 *buf, size_t *offset)
 {
     uint8 b1 = read_byte(buf, offset);
     uint8 b2 = read_byte(buf, offset);
@@ -156,13 +156,13 @@ uint16 read_word_be(uint8 *buf, uint32 *offset)
     return (b1 << 8) | b2;
 }
 
-void write_word_be(uint8 *buf, uint32 *offset, uint16 val)
+void write_word_be(uint8 *buf, size_t *offset, uint16 val)
 {
     write_byte(buf, offset, (val >> 8) & 0xFF);
     write_byte(buf, offset, (val >> 0) & 0xFF);
 }
 
-uint32 peek_dword_be(uint8 *buf, uint32 offset)
+uint32 peek_dword_be(uint8 *buf, size_t offset)
 {
     uint16 w1 = peek_word_be(buf, offset + 0);
     uint16 w2 = peek_word_be(buf, offset + 2);
@@ -170,7 +170,7 @@ uint32 peek_dword_be(uint8 *buf, uint32 offset)
     return (w1 << 16) | w2;
 }
 
-uint32 read_dword_be(uint8 *buf, uint32 *offset)
+uint32 read_dword_be(uint8 *buf, size_t *offset)
 {
     uint16 w1 = read_word_be(buf, offset);
     uint16 w2 = read_word_be(buf, offset);
@@ -178,25 +178,25 @@ uint32 read_dword_be(uint8 *buf, uint32 *offset)
     return (w1 << 16) | w2;
 }
 
-void write_dword_be(uint8 *buf, uint32 *offset, uint32 val)
+void write_dword_be(uint8 *buf, size_t *offset, uint32 val)
 {
     write_word_be(buf, offset, (val >> 16));
     write_word_be(buf, offset, (val & 0xFFFF));
 }
 
-void read_buf(uint8 *dest, uint8 *source, uint32 *offset, int size)
+void read_buf(uint8 *dest, uint8 *source, size_t *offset, int size)
 {
     memmove(dest, &source[*offset], size);
     *offset += size;
 }
 
-void write_buf(uint8 *dest, uint32 *offset, uint8 *source, int size)
+void write_buf(uint8 *dest, size_t *offset, uint8 *source, int size)
 {
     memmove(&dest[*offset], source, size);
     *offset += size;
 }
 
-uint16 crc_block(uint8 *buf, uint32 offset, int size)
+uint16 crc_block(uint8 *buf, size_t offset, int size)
 {
     uint16 crc = 0;
 
@@ -408,7 +408,6 @@ int find_matches(vars_t *v)
             min_offset += v->dict_size;
 
         min_offset -= offset;
-
         if (peek_word_be(v->pack_block_start, -min_offset) == peek_word_be(v->pack_block_start, 0))
         {
             uint16 max_count = v->mem5[offset & 0x7FFF];
@@ -1504,7 +1503,7 @@ int do_search(vars_t *v)
 
         if (!do_unpack(v))
         {
-            printf("RNC archive found: 0x%.6x (%.6d/%.6d bytes)\n", i, v->packed_size + RNC_HEADER_SIZE, v->output_offset);
+            printf("RNC archive found: 0x%.6x (%.6d/%.6zu bytes)\n", i, v->packed_size + RNC_HEADER_SIZE, v->output_offset);
             i += v->packed_size + RNC_HEADER_SIZE;
             error_code = 0;
         }
@@ -1558,10 +1557,10 @@ int parse_args(int argc, char **argv, vars_t *vars)
                     vars->dict_size = 0x400;
                 break;
             case 'i':
-                sscanf(&argv[i][3], "%x", &vars->read_start_offset);
+                sscanf(&argv[i][3], "%zx", &vars->read_start_offset);
                 break;
             case 'o':
-                sscanf(&argv[i][3], "%x", &vars->write_start_offset);
+                sscanf(&argv[i][3], "%zx", &vars->write_start_offset);
                 break;
             case 'm':
                 sscanf(&argv[i][3], "%d", &vars->method);
@@ -1650,7 +1649,7 @@ int main(int argc, char *argv[])
         if (argc <= 3 || ((argv[3][0] == '-') || (argv[3][0] == '/')))
         {
             char out_name[256];
-            snprintf(out_name, sizeof(out_name), "%s.%.6x.bin", argv[2], v->read_start_offset);
+            snprintf(out_name, sizeof(out_name), "%s.%.6zx.bin", argv[2], v->read_start_offset);
 
             out = fopen(out_name, "wb");
         }
@@ -1671,7 +1670,7 @@ int main(int argc, char *argv[])
         fclose(out);
 
         printf("File successfully %s!\n", ((v->pus_mode == 0) ? "packed" : "unpacked"));
-        printf("Original/new size: %d/%d bytes\n", (v->pus_mode == 1) ? (v->packed_size + RNC_HEADER_SIZE) : v->file_size, v->output_offset);
+        printf("Original/new size: %d/%zd bytes\n", (v->pus_mode == 1) ? (v->packed_size + RNC_HEADER_SIZE) : v->file_size, v->output_offset);
     }
     else {
         switch (error_code) {
