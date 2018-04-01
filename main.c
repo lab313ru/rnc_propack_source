@@ -1578,13 +1578,12 @@ int parse_args(int argc, char **argv, vars_t *vars)
 
 int main(int argc, char *argv[])
 {
-    printf("-= RNC ProPackED v1.1 [by Lab 313] (06/24/2017) =-\n");
+    printf("-= RNC ProPackED v1.2 [by Lab 313] (04/01/2018) =-\n");
     printf("-----------------------------\n");
     printf("Compression type: Huffman + LZ77\n");
     printf("De/Compressor: Dr.MefistO\n");
     printf("Coding: Dr. MefistO\n");
     printf("Original: Rob Northen Computing\n");
-    printf("Our site: http://lab313.ru\n");
     printf("Info: De(re)compiled source of the famous RNC ProPack compression tool\n\n");
     print_usage();
     printf("-----------------------------\n\n");
