@@ -649,7 +649,7 @@ void update_tmp_crc_data(vars_t *v, uint8 b)
         write_to_output(v, b);
 }
 
-void encode_matches_count(vars_t *v, uint16 count)
+void encode_matches_count(vars_t *v, int count)
 {
     while (count)
     {
@@ -894,7 +894,7 @@ void compress_data_2(vars_t *v)
 
                 if (v->match_count)
                 {
-                    if (v->match_count > 7)
+                    if (v->match_count >= 7)
                     {
                         write_bits_m2(v, 0xF, 4);
                         update_tmp_crc_data(v, (v->match_count - 6) & 0xFF);
@@ -1153,7 +1153,7 @@ uint8 read_source_byte(vars_t *v)
     return *v->pack_block_start++;
 }
 
-uint32 input_bits_m2(vars_t *v, uint16 count)
+uint32 input_bits_m2(vars_t *v, short count)
 {
     uint32 bits = 0;
 
@@ -1177,7 +1177,7 @@ uint32 input_bits_m2(vars_t *v, uint16 count)
     return bits;
 }
 
-uint32 input_bits_m1(vars_t *v, uint16 count)
+uint32 input_bits_m1(vars_t *v, short count)
 {
     uint32 bits = 0;
     uint32 prev_bits = 1;
@@ -1204,7 +1204,7 @@ uint32 input_bits_m1(vars_t *v, uint16 count)
     return bits;
 }
 
-int input_bits(vars_t *v, uint16 count)
+int input_bits(vars_t *v, short count)
 {
     if (v->method != 2)
         return input_bits_m1(v, count);
