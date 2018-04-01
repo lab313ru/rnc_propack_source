@@ -1552,7 +1552,7 @@ int parse_args(int argc, char **argv, vars_t *vars)
                     return 3;
                 break;
             case 'd':
-                sscanf(&argv[i][3], "%hu", &vars->dict_size);
+                sscanf(&argv[i][3], "%hx", &vars->dict_size);
                 if (vars->dict_size < 0x400)
                     vars->dict_size = 0x400;
                 break;
