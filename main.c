@@ -651,7 +651,7 @@ void update_tmp_crc_data(vars_t *v, uint8 b)
 
 void encode_matches_count(vars_t *v, int count)
 {
-    while (count)
+    while (count > 0)
     {
         if (count >= 12)
         {
