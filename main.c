@@ -1578,7 +1578,7 @@ int parse_args(int argc, char **argv, vars_t *vars)
 
 int main(int argc, char *argv[])
 {
-    printf("-= RNC ProPackED v1.2 [by Lab 313] (04/01/2018) =-\n");
+    printf("-= RNC ProPackED v1.3 [by Lab 313] (05/31/2018) =-\n");
     printf("-----------------------------\n");
     printf("Compression type: Huffman + LZ77\n");
     printf("De/Compressor: Dr.MefistO\n");
