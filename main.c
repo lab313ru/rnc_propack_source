@@ -1145,6 +1145,8 @@ uint8 read_source_byte(vars_t *v)
 
         if (left_size - size_to_read > 2)
             left_size = 2;
+        else
+            left_size -= size_to_read;
 
         read_buf(&v->mem1[size_to_read], v->input, &v->input_offset, left_size);
         v->input_offset -= left_size;
@@ -1491,7 +1493,7 @@ int do_unpack(vars_t *v)
 
 int do_search(vars_t *v)
 {
-    int error_code = 10;
+    int error_code = 11;
     for (uint32 i = 0; i < v->file_size - RNC_HEADER_SIZE; )
     {
         v->read_start_offset = i;
@@ -1501,19 +1503,29 @@ int do_search(vars_t *v)
         uint8 *input_ptr = v->input;
         v->input = &v->input[i];
 
-        if (!do_unpack(v))
+        if (!(error_code = do_unpack(v)))
         {
             printf("RNC archive found: 0x%.6x (%.6d/%.6zu bytes)\n", i, v->packed_size + RNC_HEADER_SIZE, v->output_offset);
             i += v->packed_size + RNC_HEADER_SIZE;
             error_code = 0;
         }
         else
+        {
+            switch (error_code)
+            {
+            case 4: printf("Position 0x%.6X: Packed CRC is wrong!\n", i); break;
+            case 5: printf("Position 0x%.6X: Unpacked CRC is wrong!\n", i); break;
+            case 9: printf("Position 0x%.6X: File already packed!\n", i); break;
+            case 10: printf("Position 0x%.6X: Decryption key required!\n", i); break;
+            }
+
             i++;
+        }
 
         v->input = input_ptr;
     }
 
-    return error_code;
+    return (error_code == 6) ? 11 : error_code;
 }
 
 void print_usage()
@@ -1632,17 +1644,7 @@ int main(int argc, char *argv[])
     case 2: error_code = do_search(v); break;
     }
 
-    if (v->pus_mode == 2)
-    {
-        free(v->input);
-        free(v->output);
-        free(v->temp);
-        free(v);
-
-        return error_code;
-    }
-
-    if (!error_code)
+    if (!error_code && v->pus_mode != 2)
     {
         FILE *out;
         if (argc <= 3 || ((argv[3][0] == '-') || (argv[3][0] == '/')))
@@ -1676,9 +1678,9 @@ int main(int argc, char *argv[])
         case 4: printf("Corrupted input data.\n"); break;
         case 5: printf("CRC check failed.\n"); break;
         case 6:
-        case 7:
-            printf("Wrong RNC header.\n"); break;
-        case 10: printf("No RNC archives were found.\n"); break;
+        case 7: printf("Wrong RNC header.\n"); break;
+        case 10: printf("Decryption key required.\n"); break;
+        case 11: printf("No RNC archives were found.\n"); break;
         default: printf("Cannot process file. Error code: %x\n", error_code); break;
         }
     }
