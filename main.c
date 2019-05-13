@@ -1592,13 +1592,16 @@ int main(int argc, char *argv[])
 {
     printf("-= RNC ProPackED v1.4 [by Lab 313] (11/04/2018) =-\n");
     printf("-----------------------------\n");
-    printf("Compression type: Huffman + LZ77\n");
-    printf("De/Compressor: Dr.MefistO\n");
-    printf("Coding: Dr. MefistO\n");
-    printf("Original: Rob Northen Computing\n");
-    printf("Info: De(re)compiled source of the famous RNC ProPack compression tool\n\n");
-    print_usage();
-    printf("-----------------------------\n\n");
+
+    if (argc <= 2) {
+        printf("Compression type: Huffman + LZ77\n");
+        printf("De/Compressor: Dr.MefistO\n");
+        printf("Coding: Dr. MefistO\n");
+        printf("Original: Rob Northen Computing\n");
+        printf("Info: De(re)compiled source of the famous RNC ProPack compression tool\n\n");
+        print_usage();
+        printf("-----------------------------\n\n");
+    }
 
     vars_t *v = init_vars();
     if (parse_args(argc, argv, v)) {
@@ -1675,6 +1678,7 @@ int main(int argc, char *argv[])
     }
     else {
         switch (error_code) {
+        case 0: break;
         case 4: printf("Corrupted input data.\n"); break;
         case 5: printf("CRC check failed.\n"); break;
         case 6:
