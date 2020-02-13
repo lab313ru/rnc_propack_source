@@ -83,7 +83,7 @@ typedef struct vars_s {
 
 #define RNC_SIGN 0x524E43 // RNC
 #define RNC_HEADER_SIZE 0x12
-#define MAX_BUF_SIZE 0x100000
+#define MAX_BUF_SIZE 0x1E00000
 
 static const uint16 crc_table[] = {
     0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
