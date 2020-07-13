@@ -7,4 +7,4 @@ Decompiled source of the famous RNC ProPack compression tool
 -  Pack: \<p\> <infile.bin> [outfile.bin] <-m=1|2> [-k=hex_key_to_protect]
 
 ### Specific games
--  Earthworm Jim, Alladdin: must use <u>-d=0x4000</u> for a correct packed data result.
+-  Earthworm Jim, Alladdin: must use **-d=0x4000** for a correct packed data result.
