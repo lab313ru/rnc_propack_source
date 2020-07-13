@@ -6,5 +6,5 @@ Decompiled source of the famous RNC ProPack compression tool
 ### Search: \<s\> <infile.bin>
 ### Pack: \<p\> <infile.bin> [outfile.bin] <-m=1|2> [-k=hex_key_to_protect]
 
-## Specific games
+### Specific games
 -  Earthworm Jim, Alladdin: must use -d=0x4000 for a correct packed data result.
