@@ -1491,12 +1491,13 @@ int do_unpack(vars_t *v)
     return do_unpack_data(v); // data
 }
 
-int do_search(vars_t *v)
+int do_search(vars_t *v, size_t input_size)
 {
     int error_code = 11;
-    for (uint32 i = 0; i < v->file_size - RNC_HEADER_SIZE; )
+    for (uint32 i = 0; i < input_size - RNC_HEADER_SIZE; )
     {
         v->read_start_offset = i;
+        v->file_size = input_size - i;
         v->input_offset = 0;
         v->output_offset = 0;
 
@@ -1644,7 +1645,7 @@ int main(int argc, char *argv[])
     {
     case 0: error_code = do_pack(v); break;
     case 1: error_code = do_unpack(v); break;
-    case 2: error_code = do_search(v); break;
+    case 2: error_code = do_search(v, v->file_size); break;
     }
 
     if (!error_code && v->pus_mode != 2)
