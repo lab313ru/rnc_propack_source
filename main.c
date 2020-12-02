@@ -2,6 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef _WIN32
+#include <dir.h>
+#else
+#include <direct.h>
+#endif
+
 #ifndef _countof
 #ifndef __cplusplus
 #define _countof(_Array) (sizeof(_Array) / sizeof(_Array[0]))
@@ -33,7 +39,7 @@ typedef struct vars_s {
     uint32 pack_block_size;
     uint16 dict_size;
     uint32 method;
-    uint32 pus_mode;
+    uint32 puse_mode;
     uint32 input_size;
     uint32 file_size;
 
@@ -226,7 +232,7 @@ vars_t *init_vars()
     v->pack_block_size = 0x3000;
     v->dict_size = 0xFFFF;
     v->method = 1;
-    v->pus_mode = 0;
+    v->puse_mode = 'p';
 
     v->read_start_offset = 0;
     v->write_start_offset = 0;
@@ -1447,7 +1453,7 @@ int do_unpack_data(vars_t *v)
     uint16 specified_key = v->enc_key;
 
     int error_code = 0;
-    if (input_bits(v, 1) && !v->pus_mode)
+    if (input_bits(v, 1) && v->puse_mode == 'p')
         error_code = 9;
 
     if (!error_code)
@@ -1491,7 +1497,7 @@ int do_unpack(vars_t *v)
     return do_unpack_data(v); // data
 }
 
-int do_search(vars_t *v, size_t input_size)
+int do_search(vars_t *v, size_t input_size, int save)
 {
     int error_code = 11;
     int has_rncs = 0;
@@ -1512,6 +1518,30 @@ int do_search(vars_t *v, size_t input_size)
             i += v->packed_size + RNC_HEADER_SIZE;
             error_code = 0;
             has_rncs = 1;
+
+            if (save) {
+                FILE* out;
+
+                int dir_res = mkdir("extracted");
+                if (dir_res == -1 && errno != EEXIST) {
+                    error_code = 12;
+                    break;
+                }
+
+                char out_name[256];
+                snprintf(out_name, sizeof(out_name), "%s/data_%.6zx.bin", "extracted", v->read_start_offset);
+
+                out = fopen(out_name, "wb");
+
+                if (out == NULL)
+                {
+                    error_code = 12;
+                    break;
+                }
+
+                fwrite(v->output, v->output_offset, 1, out);
+                fclose(out);
+            }
         }
         else
         {
@@ -1534,9 +1564,10 @@ int do_search(vars_t *v, size_t input_size)
 
 void print_usage()
 {
-    printf("Unpack: <u> <infile.bin> [outfile.bin] [-i=hex_offset_to_read_from] [-k=hex_key_if_protected]\n");
-    printf("Search: <s> <infile.bin>\n");
-    printf("Pack:   <p> <infile.bin> [outfile.bin] <-m=1|2> [-k=hex_key_to_protect]\n");
+    printf("Unpack        : <u> <infile.bin> [outfile.bin] [-i=hex_offset_to_read_from] [-k=hex_key_if_protected]\n");
+    printf("Search        : <s> <infile.bin>\n");
+    printf("Seach&Extract : <e> <infile.bin>\n");
+    printf("Pack          : <p> <infile.bin> [outfile.bin] <-m=1|2> [-k=hex_key_to_protect]\n");
 }
 
 int parse_args(int argc, char **argv, vars_t *vars)
@@ -1544,13 +1575,15 @@ int parse_args(int argc, char **argv, vars_t *vars)
     if (argc < 2)
         return 1;
 
-    if (strchr("pus", argv[1][0]) || strchr("PUS", argv[1][0]))
+    if (strchr("puse", argv[1][0]))
     {
         switch (argv[1][0])
         {
-        case 'p': vars->pus_mode = 0; break;
-        case 'u': vars->pus_mode = 1; break;
-        case 's': vars->pus_mode = 2; break;
+        case 'p':
+        case 'u':
+        case 's':
+        case 'e':
+            vars->puse_mode = argv[1][0]; break;
         }
     }
     else
@@ -1594,7 +1627,7 @@ int parse_args(int argc, char **argv, vars_t *vars)
 
 int main(int argc, char *argv[])
 {
-    printf("-= RNC ProPackED v1.4 [by Lab 313] (11/04/2018) =-\n");
+    printf("-= RNC ProPackED v1.5 [by Lab 313] (12/02/2020) =-\n");
     printf("-----------------------------\n");
 
     if (argc <= 2) {
@@ -1644,14 +1677,15 @@ int main(int argc, char *argv[])
     v->temp = (uint8*)malloc(MAX_BUF_SIZE);
 
     int error_code = 0;
-    switch (v->pus_mode)
+    switch (v->puse_mode)
     {
-    case 0: error_code = do_pack(v); break;
-    case 1: error_code = do_unpack(v); break;
-    case 2: error_code = do_search(v, v->file_size); break;
+    case 'p': error_code = do_pack(v); break;
+    case 'u': error_code = do_unpack(v); break;
+    case 's': 
+    case 'e': error_code = do_search(v, v->file_size, v->puse_mode == 'e'); break;
     }
 
-    if (!error_code && v->pus_mode != 2)
+    if (!error_code && v->puse_mode != 's' && v->puse_mode != 'e')
     {
         FILE *out;
         if (argc <= 3 || ((argv[3][0] == '-') || (argv[3][0] == '/')))
@@ -1677,8 +1711,8 @@ int main(int argc, char *argv[])
         fwrite(v->output, v->output_offset, 1, out);
         fclose(out);
 
-        printf("File successfully %s!\n", ((v->pus_mode == 0) ? "packed" : "unpacked"));
-        printf("Original/new size: %d/%zd bytes\n", (v->pus_mode == 1) ? (v->packed_size + RNC_HEADER_SIZE) : v->file_size, v->output_offset);
+        printf("File successfully %s!\n", ((v->puse_mode == 'p') ? "packed" : "unpacked"));
+        printf("Original/new size: %d/%zd bytes\n", (v->puse_mode == 'u') ? (v->packed_size + RNC_HEADER_SIZE) : v->file_size, v->output_offset);
     }
     else {
         switch (error_code) {
