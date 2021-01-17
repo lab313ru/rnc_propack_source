@@ -1594,33 +1594,42 @@ int parse_args(int argc, char **argv, vars_t *vars)
     int i = 3;
     while (i < argc)
     {
-        if (((argv[i][0] == '-') || (argv[i][0] == '/')))
-            switch (argv[i][1])
+        if (((argv[i][0] == '-') || (argv[i][0] == '/'))) {
+            char which = argv[i][1];
+            // If argument is just the letter, use next arg; otherwise, use what's after it
+            char const *arg_ptr = argv[i][2] ? &argv[i][2] : argv[++i];
+
+            // Argument list ends with a NULL ptr, error out if reached
+            if (!arg_ptr)
+                return 3;
+
+            switch (which)
             {
             case 'k':
-                sscanf(&argv[i][3], "%hx", &vars->enc_key);
+                sscanf(arg_ptr, "%hx", &vars->enc_key);
                 if (!vars->enc_key)
                     return 3;
                 break;
             case 'd':
-                sscanf(&argv[i][3], "%hx", &vars->dict_size);
+                sscanf(arg_ptr, "%hx", &vars->dict_size);
                 if (vars->dict_size < 0x400)
                     vars->dict_size = 0x400;
                 break;
             case 'i':
-                sscanf(&argv[i][3], "%zx", &vars->read_start_offset);
+                sscanf(arg_ptr, "%zx", &vars->read_start_offset);
                 break;
             case 'o':
-                sscanf(&argv[i][3], "%zx", &vars->write_start_offset);
+                sscanf(arg_ptr, "%zx", &vars->write_start_offset);
                 break;
             case 'm':
-                sscanf(&argv[i][3], "%d", &vars->method);
+                sscanf(arg_ptr, "%d", &vars->method);
                 if (!vars->method || vars->method > 2)
                     return 3;
                 break;
             default:
                 break;
             }
+        }
         i++;
     }
 
