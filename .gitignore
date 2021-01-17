@@ -7,3 +7,5 @@
 *.log
 *.pdb
 *.tlog
+rnc32
+rnc64

@@ -1,11 +1,13 @@
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifndef _WIN32
-#include <dir.h>
+#include <sys/stat.h>
 #else
 #include <direct.h>
+#define mkdir(name, mode) mkdir(name)
 #endif
 
 #ifndef _countof
@@ -1522,7 +1524,7 @@ int do_search(vars_t *v, size_t input_size, int save)
             if (save) {
                 FILE* out;
 
-                int dir_res = mkdir("extracted");
+                int dir_res = mkdir("extracted", S_IRWXU | S_IRWXG | S_IRWXO);
                 if (dir_res == -1 && errno != EEXIST) {
                     error_code = 12;
                     break;
@@ -1681,7 +1683,7 @@ int main(int argc, char *argv[])
     {
     case 'p': error_code = do_pack(v); break;
     case 'u': error_code = do_unpack(v); break;
-    case 's': 
+    case 's':
     case 'e': error_code = do_search(v, v->file_size, v->puse_mode == 'e'); break;
     }
 
