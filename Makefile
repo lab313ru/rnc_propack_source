@@ -1,5 +1,10 @@
+CFLAGS ?= -O3 -flto
+
 all: main.c
-	gcc -ggdb3 -O0 main.c -o rnc64
-	gcc -m32 -ggdb3 -O0 main.c -o rnc32
+	$(CC) $(CFLAGS) main.c -o rnc64
+	$(CC) $(CFLAGS) -m32 main.c -o rnc32
+.PHONY: all
+
 clean:
 	rm -f rnc64 rnc32
+.PHONY: clean
