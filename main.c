@@ -1597,7 +1597,7 @@ int parse_args(int argc, char **argv, vars_t *vars)
         if (((argv[i][0] == '-') || (argv[i][0] == '/'))) {
             char which = argv[i][1];
             // If argument is just the letter, use next arg; otherwise, use what's after it
-            char const *arg_ptr = argv[i][2] ? &argv[i][2] : argv[++i];
+            char const *arg_ptr = argv[i][3] ? &argv[i][3] : argv[++i];
 
             // Argument list ends with a NULL ptr, error out if reached
             if (!arg_ptr)
@@ -1638,7 +1638,7 @@ int parse_args(int argc, char **argv, vars_t *vars)
 
 int main(int argc, char *argv[])
 {
-    printf("-= RNC ProPackED v1.5 [by Lab 313] (12/02/2020) =-\n");
+    printf("-= RNC ProPackED v1.8 [by Lab 313] (01/26/2021) =-\n");
     printf("-----------------------------\n");
 
     if (argc <= 2) {
