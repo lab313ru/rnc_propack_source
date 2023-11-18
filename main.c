@@ -1677,15 +1677,49 @@ int main(int argc, char *argv[])
         printf("Cannot open input file!\n");
         return -1;
     }
-    fseek(in, 0, SEEK_END);
+    if (fseek(in, 0, SEEK_END)) {
+        free(v);
+        printf("Cannot fseek()\n");
+        return -1;
+    }
     v->file_size = ftell(in) - v->read_start_offset;
-    fseek(in, v->read_start_offset, SEEK_SET);
+    if (fseek(in, v->read_start_offset, SEEK_SET)) {
+        free(v);
+        printf("Cannot fseek()\n");
+        return -1;
+    }
+
     v->input = (uint8*)malloc(v->file_size);
-    fread(v->input, v->file_size, 1, in);
+    if (!v->input) {
+        free(v);
+        printf("No memory.\n");
+        return -1;
+    }
+    if (fread(v->input, v->file_size, 1, in) != 1) {
+        free(v->input);
+        free(v);
+        perror("Failed to read");
+        return -1;
+    }
+
     fclose(in);
 
     v->output = (uint8*)malloc(MAX_BUF_SIZE);
+    if (!v->output) {
+        free(v->input);
+        free(v);
+        printf("No memory.\n");
+        return -1;
+    }
+
     v->temp = (uint8*)malloc(MAX_BUF_SIZE);
+    if (!v->temp) {
+        free(v->output);
+        free(v->input);
+        free(v);
+        printf("No memory.\n");
+        return -1;
+    }
 
     int error_code = 0;
     switch (v->puse_mode)
