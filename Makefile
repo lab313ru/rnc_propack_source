@@ -1,12 +1,11 @@
-CFLAGS ?= -O3 -flto
+CFLAGS ?= -O3 -flto -Wall
 
-all: rnc64 rnc32
+all: rnc
 .PHONY: all
 
-rnc32: CFLAGS += -m32
-rnc%: main.c
+rnc: main.c
 	$(CC) $(CFLAGS) $< -o $@
 
 clean:
-	rm -f rnc64 rnc32
+	rm -f rnc
 .PHONY: clean
